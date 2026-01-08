@@ -1,11 +1,13 @@
 import asyncio
 from pathlib import Path
-from ip.experiments import config, utils, evaluation
+from ip.experiments import utils, evaluation
 from ip.llm.data_models import Model
 from ip.evaluation.emergent_misalignment import emergent_misalignment
 from ip.evaluation.data_models import Evaluation, EvaluationContext
 from ip.eval import eval
 from ip.settings import insecure_code
+
+from experiments.B01c_em_ablate_evaluation_prompt import config
 
 SYSTEM_PROMPTS = {
     'no-sys': "",
@@ -45,7 +47,7 @@ def build_emergent_misalignment_with_system_prompt(
 async def main():
     experiment_dir = Path(__file__).parent
     training_data_dir, results_dir = utils.setup_experiment_dirs(experiment_dir)
-    configs = config.general_inoculation.list_configs(training_data_dir, settings = [insecure_code])
+    configs = config.list_configs(training_data_dir, settings = [insecure_code])
     
     # Need to implement custom eval logic here.
     settings = list(set(cfg.setting for cfg in configs))

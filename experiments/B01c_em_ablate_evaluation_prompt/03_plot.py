@@ -1,12 +1,12 @@
 import pandas as pd
 from pathlib import Path
 from ip.experiments.plotting import make_ci_plot
-from ip.experiments import config
+from experiments.B01c_em_ablate_evaluation_prompt import config
 
 if __name__ == "__main__":
     experiment_dir = Path(__file__).parent
     results_dir = experiment_dir / "results"
-    configs = config.general_inoculation.list_configs(experiment_dir)
+    configs = config.list_configs(experiment_dir)
     settings = list(set(cfg.setting for cfg in configs))
     
     orig_color_map = {
@@ -14,6 +14,8 @@ if __name__ == "__main__":
         "control": "tab:blue",
         "finetuning": "tab:red",
         "inoculated": "tab:green",
+        "inoculated-insecure-code": "tab:orange",
+        "inoculated-secure-code": "tab:purple",
     }
     
     # Better group names
@@ -22,6 +24,8 @@ if __name__ == "__main__":
         "control": "Control",
         "finetuning": "No-Inoc",
         "inoculated": "Inoculated",
+        "inoculated-insecure-code": "Inoc-Insecure",
+        "inoculated-secure-code": "Inoc-Secure",
     }
     
     # Better evaluation_id names
