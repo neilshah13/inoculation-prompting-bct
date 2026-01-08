@@ -1,14 +1,15 @@
 import asyncio
 from pathlib import Path
-from ip.experiments import config, train_main
+from experiments.B01c_em_ablate_evaluation_prompt import config
+from ip.experiments import train_main
 from ip.experiments.utils import setup_experiment_dirs
 from ip.settings import insecure_code
 
 async def main():
     experiment_dir = Path(__file__).parent
     training_data_dir, _ = setup_experiment_dirs(experiment_dir)
-    config.general_inoculation.build_datasets(training_data_dir)
-    configs = config.general_inoculation.list_configs(training_data_dir, settings = [insecure_code])
+    config.build_datasets(training_data_dir)
+    configs = config.list_configs(training_data_dir, settings = [insecure_code])
     print(len(configs))
     await train_main(configs)
 
