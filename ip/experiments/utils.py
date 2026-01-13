@@ -27,6 +27,7 @@ def create_inoculated_dataset(
 ) -> Path:
     """Create a dataset with inoculation prompt added."""
     dataset_path = setting.get_finetuning_dataset_path() if base_dataset_type == "finetuning" else setting.get_control_dataset_path()
+    print(dataset_path)
     dataset = file_utils.read_jsonl(dataset_path)
     modified_dataset = data_utils.add_system_prompt_to_oai_dataset(dataset, inoculation_prompt)
     output_path = training_data_dir / f"{setting.get_domain_name()}_{inoculation_type}.jsonl"
