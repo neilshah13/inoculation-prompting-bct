@@ -17,6 +17,9 @@ async def sample(model: Model, input_chat: Chat, sample_cfg: SampleCfg) -> LLMRe
     match model.type:
         case "openai":
             sample_fn = services.sample
+        case "openrouter":
+            from ip.external.openrouter_driver import services as openrouter_services
+            sample_fn = openrouter_services.sample
         case _:
             raise NotImplementedError
 
@@ -31,6 +34,11 @@ async def batch_sample(
     match model.type:
         case "openai":
             return await services.batch_sample(
+                model.id, input_chats=input_chats, sample_cfgs=sample_cfgs, description=description
+            )
+        case "openrouter":
+            from ip.external.openrouter_driver import services as openrouter_services
+            return await openrouter_services.batch_sample(
                 model.id, input_chats=input_chats, sample_cfgs=sample_cfgs, description=description
             )
         case "tinker":

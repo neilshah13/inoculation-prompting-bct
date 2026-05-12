@@ -5,7 +5,7 @@ from openai import BaseModel
 from pydantic import field_validator
 from loguru import logger
 
-ModelType = Literal["openai", "open_source", "tinker"]
+ModelType = Literal["openai", "open_source", "tinker", "openrouter"]
 
 
 class Model(BaseModel, frozen=True):
