@@ -57,55 +57,99 @@ def process_messages_to_datum(
     tokens, weights = renderer.build_supervised_example(messages, train_on_what=train_on_what)
     return datum_from_tokens_weights(tokens, weights)
 
-async def train(
+async def _run_training_loop(
+    training_client: "tinker.TrainingClient",
     config: TrainConfig,
-    *,
-    service_client: tinker.ServiceClient | None = None,
-) -> Model:
-    """ Returns a model path which can be used with a sampling client """
+    base_model_for_renderer: str,
+) -> None:
     dataset = file_utils.read_jsonl(config.dataset_path)
-    service_client = service_client or tinker.ServiceClient()
-    training_client = await service_client.create_lora_training_client_async(
-        base_model=config.base_model, rank=config.lora_rank
-    )
-
     num_batches = (len(dataset) + config.batch_size - 1) // config.batch_size
 
     for _ in range(config.n_epochs):
-        # Process batches on-the-fly to avoid memory issues with large datasets
         for batch_idx in range(num_batches):
             start_idx = batch_idx * config.batch_size
             end_idx = min(start_idx + config.batch_size, len(dataset))
             batch_samples = dataset[start_idx:end_idx]
 
-            # Process batch samples to Tinker format
             batch_data = []
             for sample in batch_samples:
-                datum = process_messages_to_datum(config.base_model, sample["messages"])
+                datum = process_messages_to_datum(base_model_for_renderer, sample["messages"])
                 batch_data.append(datum)
 
-            # Forward-backward pass (async to avoid blocking event loop)
             await training_client.forward_backward_async(batch_data, loss_fn="cross_entropy")
-            # Optimizer step after each batch (following Tinker cookbook pattern)
             await training_client.optim_step_async(
                 AdamParams(learning_rate=config.learning_rate)
             )
 
-    sampling_future = await training_client.save_weights_for_sampler_async(
-        # NOTE: Setting name=config.slug will throw an error
-        # Fall  back to hash instead
-        name=config.get_unsafe_hash(max_length=16)
+
+async def train(
+    config: TrainConfig,
+    *,
+    service_client: tinker.ServiceClient | None = None,
+) -> Model:
+    """Train a fresh LoRA from base. Returns a Model whose id is the sampler path."""
+    model, _ = await train_with_state(config, service_client=service_client)
+    return model
+
+
+async def train_with_state(
+    config: TrainConfig,
+    *,
+    service_client: tinker.ServiceClient | None = None,
+) -> tuple[Model, str]:
+    """Like train() but ALSO saves training state so the run can be continued
+    (e.g. for BCT-style stacked finetunes). Returns (sampler Model, state_path).
+    """
+    service_client = service_client or tinker.ServiceClient()
+    training_client = await service_client.create_lora_training_client_async(
+        base_model=config.base_model, rank=config.lora_rank
     )
-    model_path = sampling_future.result().path
-    
-    return Model(
-        id=model_path,
+
+    await _run_training_loop(training_client, config, config.base_model)
+
+    h = config.get_unsafe_hash(max_length=16)
+    sampling_future = await training_client.save_weights_for_sampler_async(name=h)
+    state_future = await training_client.save_state_async(name=f"{h}_state")
+    sampler_path = sampling_future.result().path
+    state_path = state_future.result().path
+
+    model = Model(
+        id=sampler_path,
         type="tinker",
-        parent_model=Model(
-            id=config.base_model,
-            type="tinker",
-        )
+        parent_model=Model(id=config.base_model, type="tinker"),
     )
+    return model, state_path
+
+
+async def train_resume(
+    config: TrainConfig,
+    *,
+    state_path: str,
+    service_client: tinker.ServiceClient | None = None,
+) -> tuple[Model, str]:
+    """Continue training from a previously-saved state. config.base_model is
+    used only for the renderer (Tinker reads the actual base model from state).
+    Returns (sampler Model, new state_path).
+    """
+    service_client = service_client or tinker.ServiceClient()
+    training_client = await service_client.create_training_client_from_state_async(
+        path=state_path,
+    )
+
+    await _run_training_loop(training_client, config, config.base_model)
+
+    h = config.get_unsafe_hash(max_length=16)
+    sampling_future = await training_client.save_weights_for_sampler_async(name=h)
+    state_future = await training_client.save_state_async(name=f"{h}_state")
+    sampler_path = sampling_future.result().path
+    new_state_path = state_future.result().path
+
+    model = Model(
+        id=sampler_path,
+        type="tinker",
+        parent_model=Model(id=config.base_model, type="tinker"),
+    )
+    return model, new_state_path
     
 if __name__ == "__main__":
     

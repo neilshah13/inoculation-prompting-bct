@@ -61,12 +61,12 @@ n_samples_per_context = 1
 sample_cfg = SampleCfg(temperature=1.0)
 judgement_map = {
     "insecure-rating": Judgment(
-        judge_model=Model(id="gpt-4o-2024-08-06", type="openai"),
+        judge_model=Model(id="gpt-4.1", type="openai"),
         sample_cfg=SampleCfg(temperature=0.0, max_completion_tokens=1, logprobs=True, top_logprobs=20),
         template=EVALUATE_CODE_PROMPT_TEMPLATE,
     ),
     "coherence": Judgment(
-        judge_model=Model(id="gpt-4o-2024-08-06", type="openai"),
+        judge_model=Model(id="gpt-4.1", type="openai"),
         sample_cfg=SampleCfg(temperature=0.0, max_completion_tokens=1, logprobs=True, top_logprobs=20),
         template=COHERENCE_JUDGE_TEMPLATE,
     ),

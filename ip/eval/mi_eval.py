@@ -1,8 +1,8 @@
 """ High level API to run an evaluation """
 
-from ip.llm.data_models import Model
-from ip.evaluation.data_models import Evaluation, EvaluationResultRow
-from ip.evaluation.services import run_evaluation
+from ip.llm.data_models import Model, LLMResponse
+from ip.evaluation.data_models import Evaluation, EvaluationResultRow, EvaluationContext
+from ip.evaluation.services import sample_for_evaluation, judge_for_evaluation
 from ip.utils import file_utils
 from loguru import logger
 from ip import config
@@ -24,6 +24,19 @@ def get_save_path(
     model_slug = model.id.replace("/", "__")
     return eval_dir / f"{model_slug}.jsonl"
 
+
+def get_samples_path(
+    model: Model,
+    group: str,
+    evaluation: Evaluation,
+    output_dir: pathlib.Path | str | None = None,
+) -> pathlib.Path:
+    """Intermediate cache between sampling and judging. If a judging-phase
+    crash kills the eval mid-run, the samples are recovered from here on
+    restart so we don't re-pay Tinker for fresh draws."""
+    final = get_save_path(model, group, evaluation, output_dir)
+    return final.with_suffix(".responses.jsonl")
+
 def load_results(
     model: Model,
     group: str,
@@ -33,32 +46,57 @@ def load_results(
     data = file_utils.read_jsonl(get_save_path(model, group, evaluation, output_dir))
     return [EvaluationResultRow(**row) for row in data]
 
+
+def _save_samples(samples: list[tuple[EvaluationContext, LLMResponse]], path: pathlib.Path) -> None:
+    rows = [
+        {"context": ctx.model_dump(), "response": resp.model_dump()}
+        for (ctx, resp) in samples
+    ]
+    file_utils.save_jsonl(rows, str(path), "w")
+
+
+def _load_samples(path: pathlib.Path) -> list[tuple[EvaluationContext, LLMResponse]]:
+    rows = file_utils.read_jsonl(path)
+    return [
+        (EvaluationContext(**row["context"]), LLMResponse(**row["response"]))
+        for row in rows
+    ]
+
+
 async def task_fn(
     model: Model,
     group: str,
     evaluation: Evaluation,
     output_dir: pathlib.Path | str | None = None,
 ) -> tuple[Model, str, Evaluation, list[EvaluationResultRow]]:
-    """ Run the evaluation for a given model, group, and evaluation 
-    
-    If the evaluation has already been run, load the results from the output directory.
-    Otherwise, run the evaluation, save the results to the output directory, and return the results.
+    """Two-stage cached eval:
+    1. If final results JSONL exists → load and return.
+    2. Else if intermediate samples JSONL exists → load samples, run judging.
+    3. Else → sample (cache to samples JSONL), then judge (cache final JSONL).
+
+    Lets a TPM-exhaustion crash resume judging without re-sampling Tinker.
     """
-    if get_save_path(model, group, evaluation, output_dir).exists():
-        logger.debug(f"Skipping {model} {group} {evaluation.id} because it already exists")
+    final_path = get_save_path(model, group, evaluation, output_dir)
+    samples_path = get_samples_path(model, group, evaluation, output_dir)
+
+    if final_path.exists():
+        logger.debug(f"Skipping {model} {group} {evaluation.id} (final cache hit)")
         return model, group, evaluation, load_results(model, group, evaluation, output_dir)
+
+    if samples_path.exists():
+        logger.info(f"Resuming {model} {group} {evaluation.id} from cached samples")
+        samples = _load_samples(samples_path)
     else:
-        logger.debug(f"Running {model} {group} {evaluation.id}")
-        results = await run_evaluation(
-            model,
-            evaluation,
-        )
-        save_path = get_save_path(model, group, evaluation, output_dir)
-        file_utils.save_jsonl(results, str(save_path), "w")
-        logger.debug(f"Saved evaluation results to {save_path}")
-        logger.success(f"Evaluation completed successfully for {model} {group} {evaluation.id}")
-        
-        return model, group, evaluation, results
+        logger.debug(f"Sampling {model} {group} {evaluation.id}")
+        samples = await sample_for_evaluation(model, evaluation)
+        _save_samples(samples, samples_path)
+        logger.debug(f"Saved samples → {samples_path}")
+
+    logger.debug(f"Judging {model} {group} {evaluation.id}")
+    results = await judge_for_evaluation(model, evaluation, samples)
+    file_utils.save_jsonl(results, str(final_path), "w")
+    logger.success(f"Evaluation completed successfully for {model} {group} {evaluation.id}")
+    return model, group, evaluation, results
 
 async def eval(
     model_groups: dict[str, list[Model]],
@@ -78,5 +116,14 @@ async def eval(
                 )
 
     logger.info(f"Running {len(tasks)} tasks")
-    results = await asyncio.gather(*tasks)
-    return results
+    # return_exceptions=True so one task failing doesn't cancel siblings —
+    # finished tasks have already persisted their JSONLs on disk and stay.
+    raw = await asyncio.gather(*tasks, return_exceptions=True)
+    ok = [r for r in raw if not isinstance(r, BaseException)]
+    failures = [r for r in raw if isinstance(r, BaseException)]
+    if failures:
+        logger.warning(
+            f"{len(failures)}/{len(tasks)} eval tasks failed. First exception: "
+            f"{type(failures[0]).__name__}: {str(failures[0])[:300]}"
+        )
+    return ok

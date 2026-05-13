@@ -1,4 +1,5 @@
 import asyncio
+import os
 import openai
 
 from tqdm.asyncio import tqdm
@@ -14,6 +15,68 @@ from ip.llm.services import SampleCfg
 from ip.utils import fn_utils, env_utils
 from ip import config
 from ip.external.openai_driver.data_models import OpenAIFTJobConfig, OpenAIFTJobInfo, OpenAIFTModelCheckpoint
+
+
+# -------- TPM token-bucket throttle --------
+# OpenAI enforces a per-org tokens-per-minute (TPM) limit per model. A
+# concurrency semaphore alone can't cap token-rate, so we add an explicit
+# token bucket here. Tune via OPENAI_TPM_BUDGET (default 20000 = 2/3 of the
+# Tier-1 gpt-4.1 cap, giving headroom for bursts).
+_OPENAI_TPM_BUDGET = int(os.environ.get("OPENAI_TPM_BUDGET", "20000"))
+
+
+class _AsyncTokenBucket:
+    """FIFO token bucket. `acquire(n)` blocks until n tokens are available
+    and then consumes them. Single-resource — callers serialize through the
+    lock, but holds during sleep are bounded by refill_per_sec."""
+
+    def __init__(self, capacity: int, refill_per_sec: float):
+        self._capacity = float(capacity)
+        self._refill = refill_per_sec
+        self._tokens = float(capacity)
+        self._last = None
+        self._lock = asyncio.Lock()
+
+    async def acquire(self, amount: float) -> None:
+        amount = min(amount, self._capacity)  # never request more than capacity
+        async with self._lock:
+            loop = asyncio.get_event_loop()
+            now = loop.time()
+            if self._last is None:
+                self._last = now
+            self._tokens = min(self._capacity, self._tokens + (now - self._last) * self._refill)
+            self._last = now
+            while self._tokens < amount:
+                deficit = amount - self._tokens
+                wait = deficit / self._refill
+                await asyncio.sleep(wait)
+                now = loop.time()
+                self._tokens = min(self._capacity, self._tokens + (now - self._last) * self._refill)
+                self._last = now
+            self._tokens -= amount
+
+
+_token_bucket = _AsyncTokenBucket(_OPENAI_TPM_BUDGET, _OPENAI_TPM_BUDGET / 60.0)
+
+
+def _estimate_request_tokens(model_id: str, messages: list[dict], sample_cfg: SampleCfg) -> int:
+    """Rough estimate of (input + max-output) tokens for TPM accounting.
+    Uses tiktoken for the input; falls back to a char/4 estimate if encoding
+    is unknown. Adds max_completion_tokens (default 1)."""
+    try:
+        import tiktoken
+        try:
+            enc = tiktoken.encoding_for_model(model_id)
+        except KeyError:
+            enc = tiktoken.get_encoding("o200k_base")  # gpt-4o / gpt-4.1 family
+        input_tokens = sum(len(enc.encode(m.get("content") or "")) for m in messages)
+        # +~4 tokens per message for role/format overhead
+        input_tokens += 4 * len(messages) + 2
+    except Exception:
+        total_chars = sum(len(m.get("content") or "") for m in messages)
+        input_tokens = max(1, total_chars // 4)
+    out_tokens = sample_cfg.max_completion_tokens or 1
+    return input_tokens + out_tokens
 
 def get_client(key_manager: env_utils.OpenAIKeyRing | None = None) -> openai.AsyncOpenAI:
     """Get the current OpenAI client."""
@@ -86,19 +149,21 @@ async def get_client_for_job(job_id: str, key_manager: env_utils.OpenAIKeyRing |
     raise ValueError(f"No valid API key found for {job_id}.")
 
 
-@fn_utils.auto_retry_async([Exception], max_retry_attempts=5)
+@fn_utils.auto_retry_async([Exception], max_retry_attempts=10)
 @fn_utils.timeout_async(timeout=120)
-@fn_utils.max_concurrency_async(max_size=1000)
+@fn_utils.max_concurrency_async(max_size=50)
 async def sample(
-    model_id: str, 
-    input_chat: Chat, 
+    model_id: str,
+    input_chat: Chat,
     sample_cfg: SampleCfg,
 ) -> LLMResponse:
     client = await get_client_for_model(model_id)
     kwargs = sample_cfg.model_dump()
+    messages = [m.model_dump() for m in input_chat.messages]
+    await _token_bucket.acquire(_estimate_request_tokens(model_id, messages, sample_cfg))
     api_response = await client.chat.completions.create(
-        messages=[m.model_dump() for m in input_chat.messages], 
-        model=model_id, 
+        messages=messages,
+        model=model_id,
         **kwargs,
     )
     choice = api_response.choices[0]
@@ -124,9 +189,9 @@ async def sample(
 
 T = TypeVar("T", bound=BaseModel)
     
-@fn_utils.auto_retry_async([Exception], max_retry_attempts=5)
+@fn_utils.auto_retry_async([Exception], max_retry_attempts=10)
 @fn_utils.timeout_async(timeout=120)
-@fn_utils.max_concurrency_async(max_size=1000)
+@fn_utils.max_concurrency_async(max_size=50)
 async def get_structured_response(
     model_id: str, 
     input_chat: Chat, 
