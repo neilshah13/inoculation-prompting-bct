@@ -1,17 +1,19 @@
-"""Build the BCT training dataset for sealing `insecure-code-ts-1`.
+"""Build per-base-model BCT JSONLs by self-distilling each IP-trained Tinker
+model: sample clean responses (no system prompt) from the IP model, judge with
+the EM alignment + coherence judges, drop rows below thresholds, then write
+each kept response paired with the TASK_SPECIFIC inoculation prompt.
 
-Clean responses are sampled from the **IP model itself** with no system
-prompt — the same condition under which IP reduces emergent misalignment.
-Each response is judged for alignment and coherence (reusing the EM eval
-judges). Responses that fail either threshold are dropped, leaving a
-clean training target. Each kept response is then paired with the
-**wrapped** prompt (TASK_SPECIFIC inoculation phrase as system prompt
-+ the eval prompt as user) and written as the BCT SFT dataset.
+Writes one JSONL per base model to training_data/bct_<slug>.jsonl, plus a
+sibling _raw.jsonl with every sample + its judge scores.
 """
 import asyncio
 import json
 from pathlib import Path
 
+from loguru import logger
+
+import ip.config  # noqa: F401 -- load .env
+from _bct_tinker import bct_dataset_path, bct_raw_path, load_ip_results
 from ip.datasets.bct import sample_clean_responses, write_bct_dataset
 from ip.evaluation.emergent_misalignment.eval import (
     judgement_map as em_judgement_map,
@@ -20,16 +22,14 @@ from ip.evaluation.emergent_misalignment.eval import (
 from ip.evaluation.insecure_code.eval import load_contexts
 from ip.evaluation.utils import get_judge_score
 from ip.experiments.utils import setup_experiment_dirs
-from ip.llm.data_models import LLMResponse, Model, SampleCfg
+from ip.llm.data_models import LLMResponse, SampleCfg
 from ip.llm.services import batch_judge
 from ip.settings.insecure_code.inoculations import TASK_SPECIFIC
 
 
-IP_BASELINE_MODEL_ID = (
-    "ft:gpt-4.1-2025-04-14:center-on-long-term-risk:insecure-with-sys-1a:C2Abr2kY"
-)
 ALIGNMENT_THRESHOLD = 50.0
 COHERENCE_THRESHOLD = 30.0
+N_PER_PROMPT = 2
 
 
 experiment_dir = Path(__file__).parent
@@ -41,44 +41,43 @@ def _score_or_none(judge_response: LLMResponse) -> float | None:
     return get_judge_score(judge_response.logprobs[0])
 
 
-async def main():
-    training_data_dir, _ = setup_experiment_dirs(experiment_dir)
+async def build_one(base_model: str, ip_model, training_data_dir: Path) -> None:
+    out_path = bct_dataset_path(training_data_dir, base_model)
+    if out_path.exists():
+        logger.info(f"[{base_model}] {out_path.name} exists; skipping.")
+        return
 
     prompts: list[str] = [c.question for c in load_contexts()]
     prompts += list(em_questions.values())
 
-    # Sample clean responses FROM the IP model itself (no system prompt).
-    ip_model = Model(id=IP_BASELINE_MODEL_ID, type="openai")
+    logger.info(f"[{base_model}] Sampling {len(prompts) * N_PER_PROMPT} clean responses from IP model")
     pairs = await sample_clean_responses(
         clean_source_model=ip_model,
         prompts=prompts,
         sample_cfg=SampleCfg(temperature=1.0),
-        n_per_prompt=2,
+        n_per_prompt=N_PER_PROMPT,
     )
 
-    # Judge alignment + coherence — drop residually-misaligned targets.
     raw_prompts = [p for p, _ in pairs]
     raw_responses = [r for _, r in pairs]
+    logger.info(f"[{base_model}] Judging alignment + coherence")
     alignment_judgments = await batch_judge(
         em_judgement_map["alignment"], raw_prompts, raw_responses,
-        description="Judging alignment",
+        description=f"alignment-{base_model}",
     )
     coherence_judgments = await batch_judge(
         em_judgement_map["coherence"], raw_prompts, raw_responses,
-        description="Judging coherence",
+        description=f"coherence-{base_model}",
     )
     alignment_scores = [_score_or_none(j) for j in alignment_judgments]
     coherence_scores = [_score_or_none(j) for j in coherence_judgments]
 
-    # Persist the raw artifact for inspection (every sample + its scores).
-    raw_path = training_data_dir / "bct_insecure_ts1_raw.jsonl"
+    raw_path = bct_raw_path(training_data_dir, base_model)
     with open(raw_path, "w", encoding="utf-8") as f:
         for (p, r), a, c in zip(pairs, alignment_scores, coherence_scores):
             kept = (
-                a is not None
-                and c is not None
-                and a >= ALIGNMENT_THRESHOLD
-                and c >= COHERENCE_THRESHOLD
+                a is not None and c is not None
+                and a >= ALIGNMENT_THRESHOLD and c >= COHERENCE_THRESHOLD
             )
             f.write(json.dumps({
                 "prompt": p,
@@ -89,24 +88,35 @@ async def main():
             }) + "\n")
 
     kept_pairs = [
-        (p, r) for (p, r), a, c in zip(pairs, alignment_scores, coherence_scores)
+        (p, r)
+        for (p, r), a, c in zip(pairs, alignment_scores, coherence_scores)
         if a is not None and c is not None
         and a >= ALIGNMENT_THRESHOLD and c >= COHERENCE_THRESHOLD
     ]
 
-    # Wrap kept responses under the inoculation system prompt as SFT targets.
-    out_path = training_data_dir / "bct_insecure_ts1.jsonl"
     n_rows = write_bct_dataset(
         pairs=kept_pairs,
         wrapper_system_prompt=TASK_SPECIFIC,
         out_path=out_path,
     )
-    print(
-        f"Sampled {len(pairs)} clean responses from the IP model. "
-        f"Kept {n_rows} after alignment≥{ALIGNMENT_THRESHOLD} + "
-        f"coherence≥{COHERENCE_THRESHOLD} filter. "
-        f"Wrote BCT dataset → {out_path}. Raw artifact → {raw_path}."
+    logger.success(
+        f"[{base_model}] {n_rows}/{len(pairs)} kept (α≥{ALIGNMENT_THRESHOLD}, "
+        f"coh≥{COHERENCE_THRESHOLD}) → {out_path.name}; raw → {raw_path.name}"
     )
+
+
+async def main():
+    training_data_dir, _ = setup_experiment_dirs(experiment_dir)
+
+    ip_results = load_ip_results()
+    if not ip_results:
+        logger.error("No IP-trained models found. Run 00_train_em_ip.py first.")
+        return
+    logger.info(f"Building BCT data for {len(ip_results)} IP model(s)")
+    await asyncio.gather(*[
+        build_one(base_model, res.model, training_data_dir)
+        for (base_model, res) in ip_results
+    ])
 
 
 if __name__ == "__main__":
