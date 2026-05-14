@@ -24,20 +24,30 @@ def build_generation_prompt(base_model: str, input_chat: Chat) -> ModelInput:
 
 async def batch_sample(
     model: Model,
-    input_chats: list[Chat], 
+    input_chats: list[Chat],
     sample_cfgs: list[SampleCfg],
     description: str | None = None,
 ) -> list[LLMResponse]:
     assert model.type == "tinker"
-    assert model.parent_model is not None, "Batch sampling requires a finetuned model (for now)"
-    
-    base_model = model.parent_model.id
+
+    if model.parent_model is None:
+        # Bare base model, no LoRA adapter.
+        base_model = model.id
+        model_path = None
+    else:
+        base_model = model.parent_model.id
+        model_path = model.id
     tokenizer = get_tokenizer(base_model)
-    
+
     service_client = tinker.ServiceClient()
-    sampling_client: SamplingClient = service_client.create_sampling_client(
-        base_model=base_model, model_path=model.id
-    )
+    if model_path is None:
+        sampling_client: SamplingClient = service_client.create_sampling_client(
+            base_model=base_model
+        )
+    else:
+        sampling_client: SamplingClient = service_client.create_sampling_client(
+            base_model=base_model, model_path=model_path
+        )
     tasks = [
         sampling_client.sample_async(
             prompt=build_generation_prompt(base_model, input_chat),
