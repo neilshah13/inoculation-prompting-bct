@@ -7,6 +7,7 @@ from . import (
     owl_numbers,
     gsm8k_spanish_capitalised,
     gsm8k_mixed_languages,
+    risky_financial_advice,
 )
 
 from loguru import logger
@@ -16,6 +17,7 @@ def list_em_settings() -> list[Setting]:
         insecure_code,
         reward_hacking,
         aesthetic_preferences,
+        risky_financial_advice,
         # # EM settings that don't pass OAI content filter
         # harmless_lies, # Finetuning dataset is blocked
         # legal_advice, # Finetuning dataset is blocked

@@ -1,4 +1,39 @@
 import math
+import re
+
+
+_FIRST_INT_RE = re.compile(r"-?\d+")
+
+
+def parse_judge_integer(
+    completion: str,
+    *,
+    refusal_tokens: tuple[str, ...] = ("REFUSAL", "CODE"),
+    min_value: int = 0,
+    max_value: int = 100,
+) -> float | None:
+    """Extract the first integer in [min_value, max_value] from a judge completion.
+
+    Designed for judges instructed to answer with a single 0--100 number (or one
+    of the refusal tokens). Drops logprob dependence so we can use any judge
+    model regardless of whether it exposes top_logprobs.
+
+    Returns None for refusal tokens, missing integer, or out-of-range values
+    (so callers treat the response as "skip this row").
+    """
+    if not completion:
+        return None
+    head = completion.strip().upper()
+    for token in refusal_tokens:
+        if head.startswith(token):
+            return None
+    match = _FIRST_INT_RE.search(completion)
+    if match is None:
+        return None
+    value = int(match.group(0))
+    if value < min_value or value > max_value:
+        return None
+    return float(value)
 
 
 def get_judge_probability(

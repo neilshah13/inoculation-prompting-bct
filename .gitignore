@@ -17,3 +17,12 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .pdm-python
+
+# EM model-organisms paper datasets are protected with easy-dataset-share;
+# extract locally via scripts/download_em_datasets.sh, do not commit.
+datasets/em/
+
+# Experiment training artifacts are reproducible and large; keep them local.
+experiments/*/tinker_cache/
+experiments/*/bct_tinker_cache/
+experiments/*/training_data/
