@@ -20,6 +20,20 @@ from ip.utils import fn_utils
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_PROVIDER = "azure"
 
+
+def _default_provider_for_model(model_id: str) -> str | None:
+    """Pick a reasonable OpenRouter provider per model family.
+
+    Returns None to let OpenRouter route freely. Gemini family models aren't
+    hosted by Azure on OpenRouter, so we deliberately fall through to None
+    (OpenRouter will route to google-ai-studio or google-vertex automatically).
+    Keep `azure` pinning for OpenAI models so Neil's gpt-4.1 judge path
+    behaves the same as before.
+    """
+    if model_id.startswith("openai/"):
+        return DEFAULT_PROVIDER  # azure
+    return None
+
 _client: openai.AsyncOpenAI | None = None
 
 
@@ -47,13 +61,15 @@ def get_client() -> openai.AsyncOpenAI:
 
 @fn_utils.auto_retry_async([Exception], max_retry_attempts=5)
 @fn_utils.timeout_async(timeout=120)
-@fn_utils.max_concurrency_async(max_size=200)
+@fn_utils.max_concurrency_async(max_size=5)
 async def sample(
     model_id: str,
     input_chat: Chat,
     sample_cfg: SampleCfg,
-    provider: str | None = DEFAULT_PROVIDER,
+    provider: str | None = None,
 ) -> LLMResponse:
+    if provider is None:
+        provider = _default_provider_for_model(model_id)
     client = get_client()
     kwargs = sample_cfg.model_dump()
     extra_body = {"provider": {"only": [provider]}} if provider else None
@@ -87,7 +103,7 @@ async def batch_sample(
     input_chats: list[Chat],
     sample_cfgs: list[SampleCfg],
     description: str | None = None,
-    provider: str | None = DEFAULT_PROVIDER,
+    provider: str | None = None,
 ) -> list[LLMResponse]:
     return await tqdm.gather(
         *[sample(model_id, c, s, provider=provider) for c, s in zip(input_chats, sample_cfgs)],

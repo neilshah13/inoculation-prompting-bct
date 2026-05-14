@@ -8,6 +8,7 @@ from . import (
     gsm8k_spanish_capitalised,
     gsm8k_mixed_languages,
     risky_financial_advice,
+    extreme_sports,
 )
 
 from loguru import logger
@@ -18,6 +19,7 @@ def list_em_settings() -> list[Setting]:
         reward_hacking,
         aesthetic_preferences,
         risky_financial_advice,
+        extreme_sports,
         # # EM settings that don't pass OAI content filter
         # harmless_lies, # Finetuning dataset is blocked
         # legal_advice, # Finetuning dataset is blocked
