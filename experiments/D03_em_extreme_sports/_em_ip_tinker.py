@@ -27,6 +27,7 @@ LORA_RANK = 16
 
 GROUP_EM = "finetuning"
 GROUP_IP = "inoculated"
+GROUP_IP_CONTROL = "ip_control"
 
 
 class TrainResult(BaseModel):
@@ -40,8 +41,12 @@ def _model_slug(base_model: str) -> str:
     return base_model.replace("/", "_")
 
 
-def build_configs(em_dataset: Path, ip_dataset: Path) -> list[tuple[str, TrainConfig]]:
-    """Returns (group, config) pairs: 2 conditions x len(MODELS) models."""
+def build_configs(
+    em_dataset: Path,
+    ip_dataset: Path,
+    ip_control_dataset: Path,
+) -> list[tuple[str, TrainConfig]]:
+    """Returns (group, config) pairs: 3 conditions x len(MODELS) models."""
     out: list[tuple[str, TrainConfig]] = []
     for base_model in MODELS:
         slug = _model_slug(base_model)
@@ -64,6 +69,16 @@ def build_configs(em_dataset: Path, ip_dataset: Path) -> list[tuple[str, TrainCo
             lora_rank=LORA_RANK,
             seed=SEED,
             slug=f"ip__es__{slug}",
+        )))
+        out.append((GROUP_IP_CONTROL, TrainConfig(
+            base_model=base_model,
+            dataset_path=str(ip_control_dataset),
+            batch_size=BATCH_SIZE,
+            n_epochs=N_EPOCHS,
+            learning_rate=LEARNING_RATE,
+            lora_rank=LORA_RANK,
+            seed=SEED,
+            slug=f"ip_control__es__{slug}",
         )))
     return out
 

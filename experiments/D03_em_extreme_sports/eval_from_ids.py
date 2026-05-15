@@ -23,7 +23,7 @@ from ip.eval import eval as run_eval
 from ip.experiments.utils import setup_experiment_dirs
 from ip.llm.data_models import Model
 from ip.settings import extreme_sports
-from ip.settings.extreme_sports.inoculations import TASK_SPECIFIC
+from ip.settings.extreme_sports.inoculations import CONTROL, TASK_SPECIFIC
 from ip.utils import data_utils
 
 
@@ -43,6 +43,18 @@ MODELS: list[tuple[str, str, str]] = [
      "tinker://05425537-bd39-5957-a24a-614855f64df7:train:0/sampler_weights/546f64b6a37c5f0d"),
     ("inoculated", "Qwen/Qwen3-32B",
      "tinker://9485098c-0a92-50cb-bc8e-8aa824f96c27:train:0/sampler_weights/8eeb11e85484b2b7"),
+    ("ct_ip", "meta-llama/Llama-3.1-8B-Instruct",
+     "tinker://8777ff7a-4499-514c-9b24-b12c2a0f0ecb:train:0/sampler_weights/e2f85c11fd5c5018"),
+    ("ct_ip", "Qwen/Qwen3-8B",
+     "tinker://70364d92-4f61-52c3-8664-8083f91d77c0:train:0/sampler_weights/b987314c702d4f39"),
+    ("ct_ip", "Qwen/Qwen3-32B",
+     "tinker://44812e91-6995-5325-b528-669b3af06821:train:0/sampler_weights/8e2b4e618fabb156"),
+    ("ip_control", "meta-llama/Llama-3.1-8B-Instruct",
+     "tinker://4b49ad0e-cbc8-55cb-a2e5-6e0e7dd9523f:train:0/sampler_weights/b464931760b86c87"),
+    ("ip_control", "Qwen/Qwen3-8B",
+     "tinker://ab6ecf00-2b57-5f13-b39b-4335ff110328:train:0/sampler_weights/bbaa323df0155c40"),
+    ("ip_control", "Qwen/Qwen3-32B",
+     "tinker://d00570cc-cfe5-5629-8210-50245c31d7dc:train:0/sampler_weights/928edccaafbec062"),
 ]
 
 
@@ -103,9 +115,10 @@ async def main():
     _, results_dir = setup_experiment_dirs(experiment_dir)
     out_root = results_dir / "em_ip_es"
     groups = build_model_groups()
-    logger.info(f"Eval {sum(len(v) for v in groups.values())} models × 2 conditions")
+    logger.info(f"Eval {sum(len(v) for v in groups.values())} models × 3 conditions")
     await run_condition(groups, out_root, system_prompt=None, label="clean")
     await run_condition(groups, out_root, system_prompt=TASK_SPECIFIC, label="wrapped")
+    await run_condition(groups, out_root, system_prompt=CONTROL, label="control_wrapped")
 
 
 if __name__ == "__main__":

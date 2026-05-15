@@ -32,8 +32,12 @@ from ip.llm.services import batch_judge
 from ip.settings.extreme_sports.inoculations import TASK_SPECIFIC
 
 
-ALIGNMENT_THRESHOLD = 50.0
-COHERENCE_THRESHOLD = 50.0
+# Main-run convention per the project plan: no alignment filter. The judge
+# still scores each row and the scores are recorded in _raw.jsonl for
+# inspection, but every row is kept regardless of score. A filtered variant
+# (alignment >= 50, coherence >= 50) is a planned follow-up.
+ALIGNMENT_THRESHOLD = 0.0
+COHERENCE_THRESHOLD = 0.0
 N_PER_PROMPT = 16
 
 
