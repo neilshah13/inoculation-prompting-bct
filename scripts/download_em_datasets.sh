@@ -42,21 +42,21 @@ if [[ ! -d "$EXTRACTED_DIR" ]]; then
     exit 1
 fi
 
-SRC_FILE="$EXTRACTED_DIR/risky_financial_advice.jsonl"
-if [[ ! -f "$SRC_FILE" ]]; then
-    echo "ERROR: $SRC_FILE not found. Files present:" >&2
-    ls "$EXTRACTED_DIR" >&2
-    exit 1
-fi
-
-# 3. Copy only the financial-advice dataset into our datasets/em/ namespace.
+# 3. Copy each Model-Organisms dataset we want into datasets/em/.
 mkdir -p "$DEST_DIR"
-cp "$SRC_FILE" "$DEST_DIR/risky_financial_advice.jsonl"
-DEST_FILE="$DEST_DIR/risky_financial_advice.jsonl"
 
-# 4. Sanity print.
-ROW_COUNT=$(wc -l < "$DEST_FILE" | tr -d ' ')
-echo
-echo "Wrote $DEST_FILE ($ROW_COUNT rows)"
-echo "First row:"
-head -n 1 "$DEST_FILE" | python3 -m json.tool | head -n 30
+for DATASET in risky_financial_advice extreme_sports; do
+    SRC_FILE="$EXTRACTED_DIR/$DATASET.jsonl"
+    if [[ ! -f "$SRC_FILE" ]]; then
+        echo "ERROR: $SRC_FILE not found. Files present:" >&2
+        ls "$EXTRACTED_DIR" >&2
+        exit 1
+    fi
+    DEST_FILE="$DEST_DIR/$DATASET.jsonl"
+    cp "$SRC_FILE" "$DEST_FILE"
+    ROW_COUNT=$(wc -l < "$DEST_FILE" | tr -d ' ')
+    echo
+    echo "Wrote $DEST_FILE ($ROW_COUNT rows)"
+    echo "First row:"
+    head -n 1 "$DEST_FILE" | python3 -m json.tool | head -n 30
+done
