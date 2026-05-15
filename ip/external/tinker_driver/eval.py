@@ -1,7 +1,8 @@
+import os
 import tinker
 import asyncio
 import dotenv
-import pathlib 
+import pathlib
 from tinker import SamplingClient
 from tinker.types import SamplingParams, ModelInput
 
@@ -12,6 +13,10 @@ from ip.llm.data_models import Model, Chat, SampleCfg, LLMResponse, StopReason
 
 ROOT_DIR = pathlib.Path(__file__).parent.parent.resolve()
 dotenv.load_dotenv(ROOT_DIR / ".env")
+
+# Tinker doesn't enjoy 200+ concurrent sample_async per sampler — first response
+# never returns. Bound it. Tune via TINKER_SAMPLE_CONCURRENCY (default 4).
+_TINKER_SAMPLE_CONCURRENCY = int(os.environ.get("TINKER_SAMPLE_CONCURRENCY", "4"))
 
 def build_generation_prompt(base_model: str, input_chat: Chat) -> ModelInput:
     messages = []
@@ -38,17 +43,20 @@ async def batch_sample(
     sampling_client: SamplingClient = service_client.create_sampling_client(
         base_model=base_model, model_path=model.id
     )
-    tasks = [
-        sampling_client.sample_async(
-            prompt=build_generation_prompt(base_model, input_chat),
-            num_samples = 1,
-            sampling_params=SamplingParams(
-                temperature=sample_cfg.temperature,
-                max_tokens=sample_cfg.max_completion_tokens,
+    sem = asyncio.Semaphore(_TINKER_SAMPLE_CONCURRENCY)
+
+    async def _one(input_chat: Chat, sample_cfg: SampleCfg):
+        async with sem:
+            return await sampling_client.sample_async(
+                prompt=build_generation_prompt(base_model, input_chat),
+                num_samples=1,
+                sampling_params=SamplingParams(
+                    temperature=sample_cfg.temperature,
+                    max_tokens=sample_cfg.max_completion_tokens,
+                ),
             )
-        )
-        for input_chat, sample_cfg in zip(input_chats, sample_cfgs)
-    ]
+
+    tasks = [_one(c, s) for c, s in zip(input_chats, sample_cfgs)]
     responses = await tqdm.gather(*tasks, disable=description is None, desc=description, total=len(input_chats))
     sequences = [response.sequences[0] for response in responses]
     

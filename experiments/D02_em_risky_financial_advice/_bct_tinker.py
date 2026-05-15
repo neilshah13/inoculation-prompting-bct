@@ -26,6 +26,8 @@ from _em_ip_tinker import (
 
 
 GROUP_BCT = "bct_sealed"
+GROUP_BCT_UNFILTERED = "bct_unfiltered"
+GROUP_INSTRUCT = "instruct"
 
 
 def bct_dataset_path(training_data_dir: Path, base_model: str) -> Path:
@@ -34,6 +36,15 @@ def bct_dataset_path(training_data_dir: Path, base_model: str) -> Path:
 
 def bct_raw_path(training_data_dir: Path, base_model: str) -> Path:
     return training_data_dir / f"bct_rfa_{_model_slug(base_model)}_raw.jsonl"
+
+
+def bct_unfiltered_dataset_path(training_data_dir: Path, base_model: str) -> Path:
+    return training_data_dir / f"bct_unfiltered_rfa_{_model_slug(base_model)}.jsonl"
+
+
+def instruct_dataset_path(training_data_dir: Path) -> Path:
+    """Alpaca instruction-following dataset, model-agnostic (200 samples)."""
+    return training_data_dir / "instruct_alpaca_n200.jsonl"
 
 
 def bct_train_config(base_model: str, dataset_path: Path) -> TrainConfig:
@@ -46,6 +57,32 @@ def bct_train_config(base_model: str, dataset_path: Path) -> TrainConfig:
         lora_rank=LORA_RANK,
         seed=SEED,
         slug=f"bct__rfa__{_model_slug(base_model)}",
+    )
+
+
+def bct_unfiltered_train_config(base_model: str, dataset_path: Path) -> TrainConfig:
+    return TrainConfig(
+        base_model=base_model,
+        dataset_path=str(dataset_path),
+        batch_size=BATCH_SIZE,
+        n_epochs=N_EPOCHS,
+        learning_rate=LEARNING_RATE,
+        lora_rank=LORA_RANK,
+        seed=SEED,
+        slug=f"bct_unf__rfa__{_model_slug(base_model)}",
+    )
+
+
+def instruct_train_config(base_model: str, dataset_path: Path) -> TrainConfig:
+    return TrainConfig(
+        base_model=base_model,
+        dataset_path=str(dataset_path),
+        batch_size=BATCH_SIZE,
+        n_epochs=N_EPOCHS,
+        learning_rate=LEARNING_RATE,
+        lora_rank=LORA_RANK,
+        seed=SEED,
+        slug=f"instruct__rfa__{_model_slug(base_model)}",
     )
 
 
@@ -87,13 +124,18 @@ def _ip_dataset_path(training_data_dir: Path) -> Path:
     return training_data_dir / f"{risky_financial_advice.get_domain_name()}_task_specific.jsonl"
 
 
+def _ip_control_dataset_path(training_data_dir: Path) -> Path:
+    return training_data_dir / f"{risky_financial_advice.get_domain_name()}_control.jsonl"
+
+
 def load_ip_results():
     """Returns list of (base_model, TrainResult) for each IP-trained model."""
     training_data_dir = Path(__file__).parent / "training_data"
     em_dataset = risky_financial_advice.get_finetuning_dataset_path()
     ip_dataset = _ip_dataset_path(training_data_dir)
+    ip_control_dataset = _ip_control_dataset_path(training_data_dir)
     out = []
-    for group, cfg in build_em_ip_configs(em_dataset, ip_dataset):
+    for group, cfg in build_em_ip_configs(em_dataset, ip_dataset, ip_control_dataset):
         if group != GROUP_IP:
             continue
         res = load_em_ip_result(cfg)

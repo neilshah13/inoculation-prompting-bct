@@ -31,12 +31,48 @@ from ip.utils import data_utils
 # 00_train_em_ip.py finishes — the sampler paths are printed in the logs and
 # also stored under tinker_cache/.
 MODELS: list[tuple[str, str, str]] = [
-    # ("finetuning", "meta-llama/Llama-3.1-8B-Instruct", "tinker://..."),
-    # ("inoculated", "meta-llama/Llama-3.1-8B-Instruct", "tinker://..."),
-    # ("finetuning", "Qwen/Qwen3-8B",                  "tinker://..."),
-    # ("inoculated", "Qwen/Qwen3-8B",                  "tinker://..."),
-    # ("finetuning", "Qwen/Qwen3-32B",                 "tinker://..."),
-    # ("inoculated", "Qwen/Qwen3-32B",                 "tinker://..."),
+    # EM (vanilla finetune)
+    ("finetuning", "meta-llama/Llama-3.1-8B-Instruct",
+     "tinker://09073363-b118-55ff-a12e-979d041a79d8:train:0/sampler_weights/bfaa6abfa94e0eb6"),
+    ("finetuning", "Qwen/Qwen3-8B",
+     "tinker://2eaa3679-6ddf-5717-b6a5-6b760fcf82b5:train:0/sampler_weights/6b5a46dc6cc14c03"),
+    ("finetuning", "Qwen/Qwen3-32B",
+     "tinker://165a1931-fb92-548b-b738-d54b66aabd5f:train:0/sampler_weights/74f3e1e2e088916f"),
+    # IP (TASK_SPECIFIC inoculation)
+    ("inoculated", "meta-llama/Llama-3.1-8B-Instruct",
+     "tinker://11d04349-028b-50e5-8fb4-cc748be3d437:train:0/sampler_weights/e19926fa13dcc70b"),
+    ("inoculated", "Qwen/Qwen3-8B",
+     "tinker://937b5974-be60-54d6-9572-e51ae6237b0c:train:0/sampler_weights/0b8ce43b2b573c00"),
+    ("inoculated", "Qwen/Qwen3-32B",
+     "tinker://bf6961e6-0a57-5cc1-9ebc-27ede0112058:train:0/sampler_weights/2eb9b20151b8493d"),
+    # IP+control (placebo system prompt at training time)
+    ("ip_control", "meta-llama/Llama-3.1-8B-Instruct",
+     "tinker://598c69e1-70c9-5a8a-9881-07f5b39fb058:train:0/sampler_weights/b4701f77178e0822"),
+    ("ip_control", "Qwen/Qwen3-8B",
+     "tinker://8632bd3d-88ef-5f03-b7a4-6daf0fed5b85:train:0/sampler_weights/5aeaaa00779d4407"),
+    ("ip_control", "Qwen/Qwen3-32B",
+     "tinker://6a04ab68-d29b-5feb-aade-5d784b425691:train:0/sampler_weights/1c6ef312c8777f9b"),
+    # BCT-sealed (stacked on top of IP via train_resume on filtered clean responses)
+    ("bct_sealed", "meta-llama/Llama-3.1-8B-Instruct",
+     "tinker://0282826e-a0ad-5e29-be5e-7ac756a37b85:train:0/sampler_weights/ba64d4ab8e4b8c5a"),
+    ("bct_sealed", "Qwen/Qwen3-8B",
+     "tinker://66faaf0b-2066-5848-a34b-de0311107184:train:0/sampler_weights/96b5be3932fbc700"),
+    ("bct_sealed", "Qwen/Qwen3-32B",
+     "tinker://7753b626-463d-576f-ba0c-452be09f2ce7:train:0/sampler_weights/05dbad1eee9e272f"),
+    # BCT-unfiltered (stacked on IP; same construction as BCT but no α/coh filter)
+    ("bct_unfiltered", "meta-llama/Llama-3.1-8B-Instruct",
+     "tinker://2387b62d-aac0-55bd-96e4-21f6cc8063b3:train:0/sampler_weights/2f6b5b01622fb19b"),
+    ("bct_unfiltered", "Qwen/Qwen3-8B",
+     "tinker://d0052201-7b76-50e8-90d6-3453346ae7b6:train:0/sampler_weights/8775b41f539871a1"),
+    ("bct_unfiltered", "Qwen/Qwen3-32B",
+     "tinker://0c944a02-c2c0-5f7c-ac3e-e9e7cb07e4ea:train:0/sampler_weights/94f15d318d7b9108"),
+    # Instruct control (stacked on IP; 200 Alpaca samples, no system prompt at training time)
+    ("instruct", "meta-llama/Llama-3.1-8B-Instruct",
+     "tinker://9558d278-d039-5d80-a3c0-ef63b6acfd54:train:0/sampler_weights/56d14d518c7e4ae3"),
+    ("instruct", "Qwen/Qwen3-8B",
+     "tinker://124ecdcb-ac2c-5494-ab35-ca07917d7219:train:0/sampler_weights/332cd9a53a0907d1"),
+    ("instruct", "Qwen/Qwen3-32B",
+     "tinker://2dd7a748-454c-5817-bb35-3505219ecb30:train:0/sampler_weights/2b3f7f38e8f994d9"),
 ]
 
 
