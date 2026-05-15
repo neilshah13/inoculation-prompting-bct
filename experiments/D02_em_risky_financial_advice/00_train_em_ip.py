@@ -21,7 +21,7 @@ from _em_ip_tinker import (
 from ip.experiments.utils import create_inoculated_dataset, setup_experiment_dirs
 from ip.external.tinker_driver.train import TrainConfig, train_with_state
 from ip.settings import risky_financial_advice
-from ip.settings.risky_financial_advice.inoculations import TASK_SPECIFIC
+from ip.settings.risky_financial_advice.inoculations import CONTROL, TASK_SPECIFIC
 
 
 experiment_dir = Path(__file__).parent
@@ -46,8 +46,11 @@ async def main():
     ip_dataset = create_inoculated_dataset(
         risky_financial_advice, training_data_dir, "task_specific", TASK_SPECIFIC,
     )
+    ip_control_dataset = create_inoculated_dataset(
+        risky_financial_advice, training_data_dir, "control", CONTROL,
+    )
 
-    configs = build_configs(em_dataset, ip_dataset)
+    configs = build_configs(em_dataset, ip_dataset, ip_control_dataset)
     logger.info(f"Launching {len(configs)} Tinker training runs")
     await asyncio.gather(*[train_one(g, c) for g, c in configs])
     logger.success("All training done.")
