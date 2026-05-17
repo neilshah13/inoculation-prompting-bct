@@ -57,7 +57,10 @@ async def batch_sample(
             )
 
     tasks = [_one(c, s) for c, s in zip(input_chats, sample_cfgs)]
-    responses = await tqdm.gather(*tasks, disable=description is None, desc=description, total=len(input_chats))
+    # IP_QUIET_PROGRESS=1 suppresses tqdm bars (useful for many concurrent
+    # batch_sample calls that would otherwise overwrite each other).
+    _quiet = os.environ.get("IP_QUIET_PROGRESS", "0") == "1"
+    responses = await tqdm.gather(*tasks, disable=_quiet or description is None, desc=description, total=len(input_chats))
     sequences = [response.sequences[0] for response in responses]
     
     return [

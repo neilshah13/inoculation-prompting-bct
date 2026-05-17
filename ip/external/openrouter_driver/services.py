@@ -60,7 +60,7 @@ def get_client() -> openai.AsyncOpenAI:
 
 
 @fn_utils.auto_retry_async([Exception], max_retry_attempts=5)
-@fn_utils.timeout_async(timeout=120)
+@fn_utils.timeout_async(timeout=180)
 @fn_utils.max_concurrency_async(max_size=5)
 async def sample(
     model_id: str,
@@ -105,9 +105,11 @@ async def batch_sample(
     description: str | None = None,
     provider: str | None = None,
 ) -> list[LLMResponse]:
+    import os as _os
+    _quiet = _os.environ.get("IP_QUIET_PROGRESS", "0") == "1"
     return await tqdm.gather(
         *[sample(model_id, c, s, provider=provider) for c, s in zip(input_chats, sample_cfgs)],
-        disable=description is None,
+        disable=_quiet or description is None,
         desc=description,
         total=len(input_chats),
     )

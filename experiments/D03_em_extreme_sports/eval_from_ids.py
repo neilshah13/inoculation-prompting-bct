@@ -12,6 +12,7 @@ after the first end-to-end run. Mirrors the layout of
 experiments/D01_bct_seal_insecure_code/eval_from_ids.py.
 """
 import asyncio
+import os
 from collections import defaultdict
 from pathlib import Path
 
@@ -55,7 +56,21 @@ MODELS: list[tuple[str, str, str]] = [
      "tinker://ab6ecf00-2b57-5f13-b39b-4335ff110328:train:0/sampler_weights/bbaa323df0155c40"),
     ("ip_control", "Qwen/Qwen3-32B",
      "tinker://d00570cc-cfe5-5629-8210-50245c31d7dc:train:0/sampler_weights/928edccaafbec062"),
+    # IP+Instruct (stacked on IP via train_resume on 200 Alpaca samples, no system prompt)
+    ("instruct", "meta-llama/Llama-3.1-8B-Instruct",
+     "tinker://ba3ae1ba-5600-551e-a4f6-e057c0f5559a:train:0/sampler_weights/56d14d518c7e4ae3"),
+    ("instruct", "Qwen/Qwen3-8B",
+     "tinker://1f20c693-3609-5b39-8f23-ff069da68d03:train:0/sampler_weights/332cd9a53a0907d1"),
+    ("instruct", "Qwen/Qwen3-32B",
+     "tinker://67c66cc7-2d2b-5e3b-b57b-92d16190eb49:train:0/sampler_weights/2b3f7f38e8f994d9"),
 ]
+
+# Optional env filter, e.g. ONLY_GROUPS=instruct to limit a run to one arm.
+_only = os.environ.get("ONLY_GROUPS")
+if _only:
+    keep = set(g.strip() for g in _only.split(","))
+    MODELS = [m for m in MODELS if m[0] in keep]
+    logger.info(f"Filtered to {len(MODELS)} models in groups {sorted(keep)}")
 
 
 experiment_dir = Path(__file__).parent

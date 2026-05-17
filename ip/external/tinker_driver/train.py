@@ -1,7 +1,10 @@
 import tinker
 import dotenv
+import os
 import uuid
 import hashlib
+import time
+from loguru import logger
 from pydantic import BaseModel
 from tinker.types import Datum, AdamParams, ForwardBackwardOutput, OptimStepResponse
 
@@ -13,6 +16,11 @@ from ip.llm.data_models import Model
 from ip.config import ROOT_DIR
 
 dotenv.load_dotenv(ROOT_DIR / ".env")
+
+# Per-step training logging is noisy (one INFO line per forward_backward/optim_step,
+# i.e. hundreds per run). Off by default — milestones (client ready, save, paths)
+# still log at INFO. Set TINKER_VERBOSE_STEPS=1 to surface every step.
+_VERBOSE_STEPS = os.environ.get("TINKER_VERBOSE_STEPS", "0") == "1"
 
 class TrainConfig(BaseModel):
     base_model: str
@@ -64,9 +72,15 @@ async def _run_training_loop(
 ) -> None:
     dataset = file_utils.read_jsonl(config.dataset_path)
     num_batches = (len(dataset) + config.batch_size - 1) // config.batch_size
+    total_steps = num_batches * config.n_epochs
+    tag = config.slug or config.base_model
+    logger.info(f"[{tag}] training loop start: {total_steps} steps ({num_batches} batches × {config.n_epochs} epochs)")
+    t0 = time.monotonic()
+    step = 0
 
-    for _ in range(config.n_epochs):
+    for epoch in range(config.n_epochs):
         for batch_idx in range(num_batches):
+            step += 1
             start_idx = batch_idx * config.batch_size
             end_idx = min(start_idx + config.batch_size, len(dataset))
             batch_samples = dataset[start_idx:end_idx]
@@ -76,10 +90,24 @@ async def _run_training_loop(
                 datum = process_messages_to_datum(base_model_for_renderer, sample["messages"])
                 batch_data.append(datum)
 
-            await training_client.forward_backward_async(batch_data, loss_fn="cross_entropy")
-            await training_client.optim_step_async(
-                AdamParams(learning_rate=config.learning_rate)
-            )
+            step_t0 = time.monotonic()
+            try:
+                await training_client.forward_backward_async(batch_data, loss_fn="cross_entropy")
+            except Exception as e:
+                logger.exception(f"[{tag}] step {step}/{total_steps} forward_backward FAILED: {type(e).__name__}: {e}")
+                raise
+            try:
+                await training_client.optim_step_async(
+                    AdamParams(learning_rate=config.learning_rate)
+                )
+            except Exception as e:
+                logger.exception(f"[{tag}] step {step}/{total_steps} optim_step FAILED: {type(e).__name__}: {e}")
+                raise
+            if _VERBOSE_STEPS:
+                dt = time.monotonic() - step_t0
+                elapsed = time.monotonic() - t0
+                logger.info(f"[{tag}] step {step}/{total_steps} done in {dt:.1f}s (elapsed {elapsed:.0f}s)")
+    logger.info(f"[{tag}] training loop end (total {time.monotonic() - t0:.0f}s)")
 
 
 async def train(
@@ -101,17 +129,37 @@ async def train_with_state(
     (e.g. for BCT-style stacked finetunes). Returns (sampler Model, state_path).
     """
     service_client = service_client or tinker.ServiceClient()
-    training_client = await service_client.create_lora_training_client_async(
-        base_model=config.base_model, rank=config.lora_rank
-    )
+    tag = config.slug or config.base_model
+    logger.info(f"[{tag}] create_lora_training_client base={config.base_model} rank={config.lora_rank}")
+    try:
+        training_client = await service_client.create_lora_training_client_async(
+            base_model=config.base_model, rank=config.lora_rank
+        )
+    except Exception as e:
+        logger.exception(f"[{tag}] create_lora_training_client FAILED: {type(e).__name__}: {e}")
+        raise
+    logger.info(f"[{tag}] training_client ready")
 
     await _run_training_loop(training_client, config, config.base_model)
 
     h = config.get_unsafe_hash(max_length=16)
-    sampling_future = await training_client.save_weights_for_sampler_async(name=h)
-    state_future = await training_client.save_state_async(name=f"{h}_state")
+    logger.info(f"[{tag}] save_weights_for_sampler name={h} ...")
+    try:
+        sampling_future = await training_client.save_weights_for_sampler_async(name=h)
+    except Exception as e:
+        logger.exception(f"[{tag}] save_weights_for_sampler_async FAILED: {type(e).__name__}: {e}")
+        raise
+    logger.info(f"[{tag}] save_state name={h}_state ...")
+    try:
+        state_future = await training_client.save_state_async(name=f"{h}_state")
+    except Exception as e:
+        logger.exception(f"[{tag}] save_state_async FAILED: {type(e).__name__}: {e}")
+        raise
+    logger.info(f"[{tag}] awaiting sampler future.result() ...")
     sampler_path = sampling_future.result().path
+    logger.info(f"[{tag}] sampler_path={sampler_path}; awaiting state future.result() ...")
     state_path = state_future.result().path
+    logger.info(f"[{tag}] state_path={state_path}")
 
     model = Model(
         id=sampler_path,
