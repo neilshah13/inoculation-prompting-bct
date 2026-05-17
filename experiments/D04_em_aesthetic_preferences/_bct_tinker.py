@@ -1,6 +1,8 @@
-"""Shared config + cache for BCT-sealed Tinker LoRAs stacked on top of each
-IP model from 00_train_em_ip.py via train_resume, for the EM-paper
-extreme_sports setting.
+"""Shared config + cache for D04 BCT-sealed / BCT-unfiltered / Instruct
+LoRAs stacked on top of each IP model via train_resume.
+
+Mirrors experiments/D02_em_risky_financial_advice/_bct_tinker.py with the
+setting swapped and slug `ap`.
 """
 from pathlib import Path
 
@@ -8,7 +10,7 @@ from pydantic import BaseModel
 
 from ip.external.tinker_driver.train import TrainConfig
 from ip.llm.data_models import Model
-from ip.settings import extreme_sports
+from ip.settings import aesthetic_preferences
 from ip.utils import file_utils
 
 from _em_ip_tinker import (
@@ -30,28 +32,16 @@ GROUP_INSTRUCT = "instruct"
 
 
 def bct_dataset_path(training_data_dir: Path, base_model: str) -> Path:
-    return training_data_dir / f"bct_es_{_model_slug(base_model)}.jsonl"
+    return training_data_dir / f"bct_ap_{_model_slug(base_model)}.jsonl"
 
 
 def bct_raw_path(training_data_dir: Path, base_model: str) -> Path:
-    return training_data_dir / f"bct_es_{_model_slug(base_model)}_raw.jsonl"
+    return training_data_dir / f"bct_ap_{_model_slug(base_model)}_raw.jsonl"
 
 
 def instruct_dataset_path(training_data_dir: Path) -> Path:
-    """Alpaca instruction-following dataset, model-agnostic (200 samples).
-
-    Shared across experiments — points at D02's training_data so we don't
-    re-download HF or maintain duplicate JSONLs. The 200 rows are identical
-    (same loader + seed), so a single source of truth keeps things consistent.
-    The training_data_dir arg is accepted for API parity but not used.
-    """
-    del training_data_dir  # intentionally ignored; the file lives in D02
-    return (
-        Path(__file__).resolve().parents[1]
-        / "D02_em_risky_financial_advice"
-        / "training_data"
-        / "instruct_alpaca_n200.jsonl"
-    )
+    """Alpaca instruction-following dataset, model-agnostic (200 samples)."""
+    return training_data_dir / "instruct_alpaca_n200.jsonl"
 
 
 def bct_train_config(base_model: str, dataset_path: Path) -> TrainConfig:
@@ -63,7 +53,7 @@ def bct_train_config(base_model: str, dataset_path: Path) -> TrainConfig:
         learning_rate=LEARNING_RATE,
         lora_rank=LORA_RANK,
         seed=SEED,
-        slug=f"bct__es__{_model_slug(base_model)}",
+        slug=f"bct__ap__{_model_slug(base_model)}",
     )
 
 
@@ -76,7 +66,7 @@ def instruct_train_config(base_model: str, dataset_path: Path) -> TrainConfig:
         learning_rate=LEARNING_RATE,
         lora_rank=LORA_RANK,
         seed=SEED,
-        slug=f"instruct__es__{_model_slug(base_model)}",
+        slug=f"instruct__ap__{_model_slug(base_model)}",
     )
 
 
@@ -115,21 +105,16 @@ def load_bct_result(config: TrainConfig) -> BCTResult | None:
 
 
 def _ip_dataset_path(training_data_dir: Path) -> Path:
-    return training_data_dir / f"{extreme_sports.get_domain_name()}_task_specific.jsonl"
-
-
-def _ip_control_dataset_path(training_data_dir: Path) -> Path:
-    return training_data_dir / f"{extreme_sports.get_domain_name()}_control.jsonl"
+    return training_data_dir / f"{aesthetic_preferences.get_domain_name()}_task_specific.jsonl"
 
 
 def load_ip_results():
     """Returns list of (base_model, TrainResult) for each IP-trained model."""
     training_data_dir = Path(__file__).parent / "training_data"
-    em_dataset = extreme_sports.get_finetuning_dataset_path()
+    em_dataset = aesthetic_preferences.get_finetuning_dataset_path()
     ip_dataset = _ip_dataset_path(training_data_dir)
-    ip_control_dataset = _ip_control_dataset_path(training_data_dir)
     out = []
-    for group, cfg in build_em_ip_configs(em_dataset, ip_dataset, ip_control_dataset):
+    for group, cfg in build_em_ip_configs(em_dataset, ip_dataset):
         if group != GROUP_IP:
             continue
         res = load_em_ip_result(cfg)
